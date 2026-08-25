@@ -15,6 +15,8 @@ body{background:var(--bg);color:#333;}
 .card{background:var(--card);border-radius:10px;padding:18px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,.05);}
 input{padding:10px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;}
 input:focus{outline:none;border-color:var(--red);}
+select{padding:10px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;background:#fff;color:#333;}
+select:focus{outline:none;border-color:var(--red);}
 .btn{padding:10px 18px;background:var(--red);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;}
 .btn:disabled{opacity:.6;cursor:not-allowed;}
 .btn-secondary{background:#fff;color:var(--red);border:1px solid var(--red);margin-left:8px;}
@@ -42,6 +44,12 @@ tr:hover{background:#fafafa;cursor:pointer;}
 .score-row b{color:var(--red);}
 #msg{position:fixed;top:16px;right:16px;background:#333;color:#fff;padding:10px 14px;border-radius:6px;display:none;font-size:13px;z-index:200;}
 .empty{text-align:center;padding:40px;color:#999;}
+.del-btn{padding:5px 12px;background:#fff;color:var(--red);border:1px solid var(--red);border-radius:5px;cursor:pointer;font-size:12px;}
+.del-btn:hover{background:var(--red);color:#fff;}
+tr:hover{cursor:pointer;}
+td .del-btn{cursor:pointer;}
+.filter-label{font-size:13px;color:var(--brown);font-weight:600;white-space:nowrap;}
+.del-tip{font-size:12px;color:#999;margin-left:auto;}
 </style>
 </head>
 <body>
@@ -73,9 +81,12 @@ tr:hover{background:#fafafa;cursor:pointer;}
         <div class="stat"><b id="statDual">0</b><span>双核心人数</span></div>
       </div>
       <div class="toolbar">
-        <input type="text" id="search" placeholder="搜索姓名/门店/岗位" oninput="renderTable()" style="width:220px;">
-        <input type="date" id="filterDate" onchange="renderTable()">
+        <input type="text" id="search" placeholder="搜索姓名/手机/门店/岗位" oninput="renderTable()" style="width:200px;">
+        <select id="filterStore" onchange="renderTable()"><option value="">全部门店</option></select>
+        <select id="filterAnchor" onchange="renderTable()"><option value="">全部职业锚</option></select>
+        <input type="date" id="filterDate" onchange="renderTable()" style="width:150px;">
         <button class="btn btn-secondary" onclick="clearFilter()">清空筛选</button>
+        <span class="del-tip">筛选后导出 = 只导出当前筛选结果</span>
       </div>
       <div id="tableBox"><p class="empty">加载中...</p></div>
     </div>
@@ -150,6 +161,7 @@ async function loadData(){
     if(res.status===401){logout(); alert('登录已过期，请重新登录'); return;}
     if(!res.ok) throw new Error('读取失败 '+res.status);
     data=await res.json();
+    populateFilters();
     updateStats();
     renderTable();
     showMsg('已加载 '+data.length+' 条记录');
@@ -157,6 +169,37 @@ async function loadData(){
 }
 
 function fmtTime(iso){if(!iso)return '-'; var d=new Date(iso); return d.toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}
+
+function populateFilters(){
+  var selStore=document.getElementById('filterStore');
+  var selAnchor=document.getElementById('filterAnchor');
+  var curS=selStore.value, curA=selAnchor.value;
+  var stores={}, anchors={};
+  data.forEach(function(r){
+    var s=(r.dept||'').trim(); if(s) stores[s]=1;
+    (r.core_names||'').split(/[+,，、]/).forEach(function(a){a=a.trim(); if(a) anchors[a]=1;});
+  });
+  var hs='<option value="">全部门店</option>';
+  Object.keys(stores).sort().forEach(function(s){hs+='<option value="'+s.replace(/"/g,'&quot;')+'">'+s+'</option>';});
+  selStore.innerHTML=hs; selStore.value=curS;
+  var ha='<option value="">全部职业锚</option>';
+  ANCHOR_KEYS.forEach(function(a){if(anchors[a]) ha+='<option value="'+a+'">'+a+'</option>';});
+  selAnchor.innerHTML=ha; selAnchor.value=curA;
+}
+
+function getFiltered(){
+  var kw=document.getElementById('search').value.trim().toLowerCase();
+  var fs=document.getElementById('filterStore').value;
+  var fa=document.getElementById('filterAnchor').value;
+  var fd=document.getElementById('filterDate').value;
+  return data.filter(function(r){
+    if(kw && ((r.name||'')+(r.dept||'')+(r.position||'')+(r.phone||'')).toLowerCase().indexOf(kw)<0) return false;
+    if(fs && (r.dept||'')!==fs) return false;
+    if(fa && (r.core_names||'').split(/[+,，、]/).indexOf(fa)<0) return false;
+    if(fd && (r.created_at||'').slice(0,10)!==fd) return false;
+    return true;
+  });
+}
 
 function updateStats(){
   var today=new Date().toISOString().slice(0,10);
@@ -168,16 +211,10 @@ function updateStats(){
 }
 
 function renderTable(){
-  var kw=document.getElementById('search').value.trim().toLowerCase();
-  var fd=document.getElementById('filterDate').value;
-  var rows=data.filter(function(r){
-    if(kw && ((r.name||'')+(r.dept||'')+(r.position||'')+(r.phone||'')).toLowerCase().indexOf(kw)<0) return false;
-    if(fd && (r.created_at||'').slice(0,10)!==fd) return false;
-    return true;
-  });
+  var rows=getFiltered();
   var box=document.getElementById('tableBox');
   if(!rows.length){box.innerHTML='<p class="empty">暂无数据</p>'; return;}
-  var html='<table><thead><tr><th>序号</th><th>姓名</th><th>手机</th><th>门店/部门</th><th>岗位</th><th>核心职业锚</th><th>提交时间</th></tr></thead><tbody>';
+  var html='<table><thead><tr><th>序号</th><th>姓名</th><th>手机</th><th>门店/部门</th><th>岗位</th><th>核心职业锚</th><th>提交时间</th><th>操作</th></tr></thead><tbody>';
   rows.forEach(function(r){
     html+='<tr onclick="openDetail('+r.id+')">';
     html+='<td>'+r.id+'</td>';
@@ -187,10 +224,27 @@ function renderTable(){
     html+='<td>'+(r.position||'-')+'</td>';
     html+='<td>'+(r.core_names||'-')+'</td>';
     html+='<td>'+fmtTime(r.created_at)+'</td>';
+    html+='<td><button class="del-btn" onclick="event.stopPropagation();delRecord('+r.id+',\''+String(r.name||'').replace(/'/g,"\\'")+'\')">删除</button></td>';
     html+='</tr>';
   });
   html+='</tbody></table>';
   box.innerHTML=html;
+}
+
+async function delRecord(id,name){
+  if(!(await ensureSession())) return;
+  if(!confirm('确定删除「'+(name||id)+'」的测评记录吗？\n删除后无法恢复！')) return;
+  try{
+    var res=await fetch(SUPABASE_URL+'/rest/v1/submissions?id=eq.'+id,{
+      method:'DELETE',
+      headers:{'apikey':PUBLISHABLE_KEY,'Authorization':'Bearer '+session.access_token,'Accept':'application/json'}
+    });
+    if(res.status===401){logout(); alert('登录已过期，请重新登录'); return;}
+    if(res.status===403){alert('删除权限不足：请在 Supabase SQL 编辑器执行：\n\ngrant delete on table submissions to authenticated;'); return;}
+    if(!res.ok) throw new Error('删除失败 '+res.status);
+    showMsg('已删除记录 #'+id);
+    loadData();
+  }catch(e){alert('删除失败：'+e.message);}
 }
 
 function openDetail(id){
@@ -216,11 +270,12 @@ function openDetail(id){
 
 function closeModal(){document.getElementById('detailModal').classList.remove('active');}
 
-function clearFilter(){document.getElementById('search').value='';document.getElementById('filterDate').value='';renderTable();}
+function clearFilter(){document.getElementById('search').value='';document.getElementById('filterStore').value='';document.getElementById('filterAnchor').value='';document.getElementById('filterDate').value='';renderTable();}
 
 function exportExcel(){
-  if(!data.length){alert('没有数据可导出'); return;}
-  var rows=data.map(function(r){
+  var rows=getFiltered();
+  if(!rows.length){alert('当前筛选条件下没有数据可导出'); return;}
+  rows=rows.map(function(r){
     var o={序号:r.id,姓名:r.name||'',手机:r.phone||'',门店:r.dept||'',岗位:r.position||'',核心职业锚:r.core_names||'',提交时间:r.created_at||''};
     var avg=(r.report||{}).avg||{};
     ANCHOR_KEYS.forEach(function(k){o[k]=avg[k]||0;});
@@ -230,6 +285,7 @@ function exportExcel(){
   var wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'测评汇总');
   var dateStr=new Date().toISOString().slice(0,10);
   XLSX.writeFile(wb,'职业锚测评_'+dateStr+'.xlsx');
+  showMsg('已导出 '+rows.length+' 条记录');
 }
 
 window.onload=function(){
