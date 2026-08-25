@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>职业锚测评 - 后台管理</title>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.mini.min.js"></script>
+<style>
+:root{--red:#c8102e;--brown:#6b4f3a;--bg:#f7f5f2;--card:#fff;}
+*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;}
+body{background:var(--bg);color:#333;}
+.container{max-width:1000px;margin:0 auto;padding:20px;}
+.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;}
+.header h1{font-size:22px;color:var(--red);}
+.card{background:var(--card);border-radius:10px;padding:18px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,.05);}
+input{padding:10px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;}
+input:focus{outline:none;border-color:var(--red);}
+.btn{padding:10px 18px;background:var(--red);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;}
+.btn:disabled{opacity:.6;cursor:not-allowed;}
+.btn-secondary{background:#fff;color:var(--red);border:1px solid var(--red);margin-left:8px;}
+.login-form{max-width:360px;margin:80px auto;}
+.login-form h2{color:var(--red);margin-bottom:16px;text-align:center;}
+.login-form input{width:100%;margin-bottom:12px;}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px;}
+.stat{background:#fff0f2;padding:14px;border-radius:8px;text-align:center;}
+.stat b{display:block;font-size:22px;color:var(--red);}
+.stat span{font-size:12px;color:var(--brown);}
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;}
+table{width:100%;border-collapse:collapse;font-size:13px;background:#fff;border-radius:8px;overflow:hidden;}
+th,td{padding:10px;border-bottom:1px solid #eee;text-align:left;}
+th{background:var(--red);color:#fff;font-weight:600;}
+tr:hover{background:#fafafa;cursor:pointer;}
+.modal{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);display:none;justify-content:center;align-items:center;z-index:100;}
+.modal.active{display:flex;}
+.modal-content{background:#fff;width:90%;max-width:600px;max-height:90vh;overflow:auto;border-radius:10px;padding:20px;}
+.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;}
+.close{font-size:24px;cursor:pointer;color:#999;}
+.block{margin-bottom:12px;padding:12px;background:#fafafa;border-radius:6px;}
+.block h4{color:var(--red);margin-bottom:6px;}
+.block p{font-size:13px;color:#444;margin-bottom:4px;}
+.score-row{display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:1px solid #eee;}
+.score-row b{color:var(--red);}
+#msg{position:fixed;top:16px;right:16px;background:#333;color:#fff;padding:10px 14px;border-radius:6px;display:none;font-size:13px;z-index:200;}
+.empty{text-align:center;padding:40px;color:#999;}
+</style>
+</head>
+<body>
+<div class="container">
+  <div id="loginBox" class="card login-form">
+    <h2>职业锚测评后台</h2>
+    <input type="text" id="email" placeholder="邮箱" value="admin@lanxiangzi.local">
+    <input type="password" id="password" placeholder="密码" value="admin123">
+    <button class="btn" style="width:100%;margin-top:6px;" onclick="login()" id="loginBtn">登录</button>
+    <p style="font-size:12px;color:#999;margin-top:10px;text-align:center;">默认账号已预置，登录后即可查看实时数据</p>
+  </div>
+
+  <div id="adminBox" style="display:none;">
+    <div class="header">
+      <h1>职业锚测评后台</h1>
+      <div>
+        <button class="btn btn-secondary" onclick="loadData()">刷新</button>
+        <button class="btn" onclick="exportExcel()">导出 Excel</button>
+        <button class="btn btn-secondary" onclick="logout()">退出</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="stats">
+        <div class="stat"><b id="statTotal">0</b><span>总提交数</span></div>
+        <div class="stat"><b id="statToday">0</b><span>今日提交</span></div>
+        <div class="stat"><b id="statTech">0</b><span>技术型</span></div>
+        <div class="stat"><b id="statMgmt">0</b><span>管理型</span></div>
+        <div class="stat"><b id="statDual">0</b><span>双核心人数</span></div>
+      </div>
+      <div class="toolbar">
+        <input type="text" id="search" placeholder="搜索姓名/门店/岗位" oninput="renderTable()" style="width:220px;">
+        <input type="date" id="filterDate" onchange="renderTable()">
+        <button class="btn btn-secondary" onclick="clearFilter()">清空筛选</button>
+      </div>
+      <div id="tableBox"><p class="empty">加载中...</p></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="detailModal">
+  <div class="modal-content">
+    <div class="modal-header"><h3 id="modalTitle">测评详情</h3><span class="close" onclick="closeModal()">&times;</span></div>
+    <div id="modalBody"></div>
+  </div>
+</div>
+
+<div id="msg"></div>
+
+<script>
+var SUPABASE_URL='https://ptfkmnenapowzafvqdch.supabase.co';
+var PUBLISHABLE_KEY='sb_publishable_hN07YAXpyTEoCFoCMBdceg_Y1jElOPs';
+var ANCHOR_KEYS=["技术/职能型","管理型","自主/独立型","安全/稳定型","创业型","服务/奉献型","挑战型","生活型"];
+var session=null;
+var data=[];
+
+function showMsg(text){var m=document.getElementById('msg');m.textContent=text;m.style.display='block';setTimeout(function(){m.style.display='none';},3000);}
+
+async function login(){
+  var btn=document.getElementById('loginBtn'); btn.disabled=true; btn.textContent='登录中...';
+  var email=document.getElementById('email').value.trim();
+  var password=document.getElementById('password').value;
+  try{
+    var res=await fetch(SUPABASE_URL+'/auth/v1/token?grant_type=password',{
+      method:'POST',
+      headers:{'apikey':PUBLISHABLE_KEY,'Content-Type':'application/json'},
+      body:JSON.stringify({email:email,password:password})
+    });
+    var json=await res.json();
+    if(!res.ok || json.error) throw new Error(json.error_description||json.error||'登录失败');
+    session={access_token:json.access_token,refresh_token:json.refresh_token,expires_at:json.expires_at};
+    localStorage.setItem('ca_session',JSON.stringify(session));
+    document.getElementById('loginBox').style.display='none';
+    document.getElementById('adminBox').style.display='block';
+    showMsg('登录成功');
+    loadData();
+  }catch(e){alert('登录失败：'+e.message);}
+  finally{btn.disabled=false;btn.textContent='登录';}
+}
+
+function logout(){
+  localStorage.removeItem('ca_session'); session=null; data=[];
+  document.getElementById('loginBox').style.display='block';
+  document.getElementById('adminBox').style.display='none';
+}
+
+function getSession(){
+  try{var s=JSON.parse(localStorage.getItem('ca_session')); if(s && s.expires_at && Date.now()/1000 < s.expires_at-60) return s;}catch(e){}
+  return null;
+}
+
+async function ensureSession(){
+  var s=getSession(); if(s){session=s; return true;}
+  document.getElementById('loginBox').style.display='block';
+  document.getElementById('adminBox').style.display='none';
+  return false;
+}
+
+async function loadData(){
+  if(!(await ensureSession())) return;
+  var box=document.getElementById('tableBox'); box.innerHTML='<p class="empty">加载中...</p>';
+  try{
+    var res=await fetch(SUPABASE_URL+'/rest/v1/submissions?select=*&order=id.desc',{
+      headers:{'apikey':PUBLISHABLE_KEY,'Authorization':'Bearer '+session.access_token,'Accept':'application/json'}
+    });
+    if(res.status===401){logout(); alert('登录已过期，请重新登录'); return;}
+    if(!res.ok) throw new Error('读取失败 '+res.status);
+    data=await res.json();
+    updateStats();
+    renderTable();
+    showMsg('已加载 '+data.length+' 条记录');
+  }catch(e){box.innerHTML='<p class="empty">加载失败：'+e.message+'</p>';}
+}
+
+function fmtTime(iso){if(!iso)return '-'; var d=new Date(iso); return d.toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}
+
+function updateStats(){
+  var today=new Date().toISOString().slice(0,10);
+  document.getElementById('statTotal').textContent=data.length;
+  document.getElementById('statToday').textContent=data.filter(function(r){return (r.created_at||'').slice(0,10)===today;}).length;
+  document.getElementById('statTech').textContent=data.filter(function(r){return (r.core_names||'').indexOf('技术')>=0;}).length;
+  document.getElementById('statMgmt').textContent=data.filter(function(r){return (r.core_names||'').indexOf('管理')>=0;}).length;
+  document.getElementById('statDual').textContent=data.filter(function(r){return ((r.report||{}).dual||r.core_names&&r.core_names.indexOf('+')>=0);}).length;
+}
+
+function renderTable(){
+  var kw=document.getElementById('search').value.trim().toLowerCase();
+  var fd=document.getElementById('filterDate').value;
+  var rows=data.filter(function(r){
+    if(kw && ((r.name||'')+(r.dept||'')+(r.position||'')+(r.phone||'')).toLowerCase().indexOf(kw)<0) return false;
+    if(fd && (r.created_at||'').slice(0,10)!==fd) return false;
+    return true;
+  });
+  var box=document.getElementById('tableBox');
+  if(!rows.length){box.innerHTML='<p class="empty">暂无数据</p>'; return;}
+  var html='<table><thead><tr><th>序号</th><th>姓名</th><th>手机</th><th>门店/部门</th><th>岗位</th><th>核心职业锚</th><th>提交时间</th></tr></thead><tbody>';
+  rows.forEach(function(r){
+    html+='<tr onclick="openDetail('+r.id+')">';
+    html+='<td>'+r.id+'</td>';
+    html+='<td>'+(r.name||'-')+'</td>';
+    html+='<td>'+(r.phone||'-')+'</td>';
+    html+='<td>'+(r.dept||'-')+'</td>';
+    html+='<td>'+(r.position||'-')+'</td>';
+    html+='<td>'+(r.core_names||'-')+'</td>';
+    html+='<td>'+fmtTime(r.created_at)+'</td>';
+    html+='</tr>';
+  });
+  html+='</tbody></table>';
+  box.innerHTML=html;
+}
+
+function openDetail(id){
+  var r=data.find(function(x){return x.id===id;});
+  if(!r) return;
+  document.getElementById('modalTitle').textContent=(r.name||'未知')+' 的测评详情';
+  var rep=r.report||{};
+  var html='<div class="block"><h4>核心职业锚</h4><p>'+(r.core_names||'-')+'</p></div>';
+  html+='<div class="block"><h4>八锚得分</h4>';
+  var avg=rep.avg||{};
+  ANCHOR_KEYS.forEach(function(k){html+='<div class="score-row"><span>'+k+'</span><b>'+(avg[k]||0).toFixed(2)+'</b></div>';});
+  html+='</div>';
+  var blocks=rep.blocks||[];
+  blocks.forEach(function(b){
+    html+='<div class="block"><h4>'+b.type+' · '+b.short+'</h4>';
+    html+='<p><b>优势：</b>'+(b.strength||[]).join('、')+'</p>';
+    html+='<p><b>建议：</b>'+(b.tips||[]).join('；')+'</p></div>';
+  });
+  html+='<div class="block"><h4>附加题</h4><p>'+(r.top3||[]).join(', ')+'</p></div>';
+  document.getElementById('modalBody').innerHTML=html;
+  document.getElementById('detailModal').classList.add('active');
+}
+
+function closeModal(){document.getElementById('detailModal').classList.remove('active');}
+
+function clearFilter(){document.getElementById('search').value='';document.getElementById('filterDate').value='';renderTable();}
+
+function exportExcel(){
+  if(!data.length){alert('没有数据可导出'); return;}
+  var rows=data.map(function(r){
+    var o={序号:r.id,姓名:r.name||'',手机:r.phone||'',门店:r.dept||'',岗位:r.position||'',核心职业锚:r.core_names||'',提交时间:r.created_at||''};
+    var avg=(r.report||{}).avg||{};
+    ANCHOR_KEYS.forEach(function(k){o[k]=avg[k]||0;});
+    return o;
+  });
+  var ws=XLSX.utils.json_to_sheet(rows);
+  var wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'测评汇总');
+  var dateStr=new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb,'职业锚测评_'+dateStr+'.xlsx');
+}
+
+window.onload=function(){
+  if(getSession()){document.getElementById('loginBox').style.display='none';document.getElementById('adminBox').style.display='block';loadData();}
+};
+</script>
+</body>
+</html>
